@@ -1,5 +1,6 @@
-import React from 'react';
-import { AlertTriangle, RefreshCw, Settings } from 'lucide-react';
+import React, { useState } from 'react';
+import { AlertTriangle, RefreshCw, Settings, Check } from 'lucide-react';
+import { clearServerCache } from '../services/api';
 
 interface ErrorStateProps {
   message: string;
@@ -8,6 +9,18 @@ interface ErrorStateProps {
 }
 
 export const ErrorState: React.FC<ErrorStateProps> = ({ message, onRetry, onOpenSettings }) => {
+  const [syncing, setSyncing] = useState<boolean>(false);
+  const [synced, setSynced] = useState<boolean>(false);
+
+  const handleRetrySync = async () => {
+    setSyncing(true);
+    await clearServerCache();
+    await onRetry();
+    setSyncing(false);
+    setSynced(true);
+    setTimeout(() => setSynced(false), 3000);
+  };
+
   return (
     <div className="py-16 px-4 text-center max-w-lg mx-auto space-y-6">
       
@@ -28,11 +41,25 @@ export const ErrorState: React.FC<ErrorStateProps> = ({ message, onRetry, onOpen
 
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
         <button
-          onClick={onRetry}
-          className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-accent text-white font-semibold text-sm shadow-glow-violet hover:scale-105 transition-all flex items-center justify-center space-x-2"
+          onClick={handleRetrySync}
+          disabled={syncing}
+          className={`w-full sm:w-auto px-6 py-3 rounded-xl font-semibold text-sm shadow-glow-violet transition-all flex items-center justify-center space-x-2 ${
+            synced
+              ? 'bg-emerald-500 text-white'
+              : 'bg-gradient-accent text-white hover:scale-105'
+          }`}
         >
-          <RefreshCw className="w-4 h-4" />
-          <span>Retry Sync</span>
+          {synced ? (
+            <>
+              <Check className="w-4 h-4" />
+              <span>Content Updated Successfully</span>
+            </>
+          ) : (
+            <>
+              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+              <span>{syncing ? 'Syncing...' : 'Retry Sync'}</span>
+            </>
+          )}
         </button>
 
         <button

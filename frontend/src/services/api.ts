@@ -1,16 +1,41 @@
 import { SheetApiResponse, ExtractedContentResponse } from '../types/content';
 
 /**
- * Fetch Google Sheet content or sample fallback library
+ * Centralized Production API Base URL Resolver
+ * Resolves VITE_API_URL environment variable or defaults to same-origin /api.
+ */
+export function getApiBaseUrl(): string {
+  const envUrl = (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.VITE_APP_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim().length > 0) {
+    let cleanUrl = envUrl.trim().replace(/\/+$/, '');
+    if (cleanUrl.endsWith('/api')) {
+      cleanUrl = cleanUrl.replace(/\/api$/, '');
+    }
+    return cleanUrl;
+  }
+  return '';
+}
+
+/**
+ * Fetch Google Sheet content or fallback library
  */
 export async function fetchSheetData(sheetUrl?: string, apiKey?: string): Promise<SheetApiResponse> {
   const params = new URLSearchParams();
   if (sheetUrl) params.append('url', sheetUrl);
   if (apiKey) params.append('apiKey', apiKey);
 
-  const response = await fetch(`/api/sheet?${params.toString()}`);
+  const baseUrl = getApiBaseUrl();
+  const endpoint = `${baseUrl}/api/sheet?${params.toString()}`;
+
+  const response = await fetch(endpoint);
   if (!response.ok) {
-    throw new Error(`Failed to load content from server (${response.status})`);
+    const errorText = await response.text().catch(() => '');
+    let errorMessage = `Failed to load content from server (${response.status})`;
+    try {
+      const parsed = JSON.parse(errorText);
+      if (parsed.error) errorMessage = parsed.error;
+    } catch (e) {}
+    throw new Error(errorMessage);
   }
   return response.json();
 }
@@ -20,7 +45,10 @@ export async function fetchSheetData(sheetUrl?: string, apiKey?: string): Promis
  */
 export async function fetchExtractedContent(targetUrl: string): Promise<ExtractedContentResponse> {
   const params = new URLSearchParams({ url: targetUrl });
-  const response = await fetch(`/api/extract-content?${params.toString()}`);
+  const baseUrl = getApiBaseUrl();
+  const endpoint = `${baseUrl}/api/extract-content?${params.toString()}`;
+
+  const response = await fetch(endpoint);
   if (!response.ok) {
     return {
       success: false,
@@ -36,7 +64,8 @@ export async function fetchExtractedContent(targetUrl: string): Promise<Extracte
  */
 export async function clearServerCache(): Promise<boolean> {
   try {
-    const response = await fetch('/api/clear-cache', { method: 'POST' });
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/api/clear-cache`, { method: 'POST' });
     return response.ok;
   } catch (e) {
     return false;
