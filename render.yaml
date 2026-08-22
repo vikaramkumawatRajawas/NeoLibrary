@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: neolibrary
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: node backend/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: DEFAULT_SHEET_URL
+        value: https://docs.google.com/spreadsheets/d/1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg/edit?usp=sharing
+      - key: GOOGLE_SHEET_ID
+        value: 1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg
+      - key: NODE_ENV
+        value: production
