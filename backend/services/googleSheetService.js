@@ -1,79 +1,11 @@
 import axios from 'axios';
 import { getCache, setCache } from './cacheService.js';
-import { getDomainFromUrl, isValidUrl } from '../utils/urlParser.js';
+import { isValidUrl } from '../utils/urlParser.js';
+import { getUniqueFallbackImage, isUsableImage } from '../utils/imageResolver.js';
 
-// Topic-based 4K high resolution image bank for deterministic fallback matching
-const TOPIC_IMAGE_BANK = {
-  food: [
-    'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1514933651103-005eec06c04b?auto=format&fit=crop&w=1200&q=80',
-  ],
-  architecture: [
-    'https://images.unsplash.com/photo-1582510003544-4d00b7f74220?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1200&q=80',
-  ],
-  cinema: [
-    'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1478720568477-152d9b164e26?auto=format&fit=crop&w=1200&q=80',
-  ],
-  music: [
-    'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=1200&q=80',
-  ],
-  sports: [
-    'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1530549387789-4c1017266635?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1517649763962-0c623266010b?auto=format&fit=crop&w=1200&q=80',
-  ],
-  books: [
-    'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=1200&q=80',
-  ],
-  education: [
-    'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=1200&q=80',
-  ],
-  aviation: [
-    'https://images.unsplash.com/photo-1436491865332-7a61a109cc05?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1508614589041-895b88991e3e?auto=format&fit=crop&w=1200&q=80',
-  ],
-  science: [
-    'https://images.unsplash.com/photo-1507413245164-6160d8298b31?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=1200&q=80',
-  ],
-  news: [
-    'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=1200&q=80',
-  ]
-};
-
-// Fallback sample dataset
-const SAMPLE_DIGITAL_LIBRARY = [
-  {
-    id: 'sample-1',
-    title: 'The Future of AI Systems: Building Autonomous Agentic Workflows',
-    author: 'Dr. Evelyn Vance',
-    url: 'https://arxiv.org/abs/2303.08774',
-    content: 'An in-depth study of next-generation autonomous AI agents, tool orchestration, self-reflection loops, and multi-agent synergy.',
-    category: 'Artificial Intelligence',
-    date: '2026-04-15',
-    image: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80'
-  },
-  {
-    id: 'sample-2',
-    title: 'Quantum Computing Frontiers: Qubits to Fault-Tolerant Supercomputers',
-    author: 'Prof. Marcus Sterling',
-    url: 'https://nature.com/articles/s41586-023-00000',
-    content: 'Exploring recent breakthroughs in topological qubits, error correction algorithms, and room-temperature quantum processors.',
-    category: 'Quantum Physics',
-    date: '2026-03-22',
-    image: 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?auto=format&fit=crop&w=1200&q=80'
-  }
-];
+const usedFallbackSet = new Set();
+const DEFAULT_THE_HINDU_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg/edit?usp=sharing';
+const DEFAULT_THE_HINDU_SHEET_ID = '1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg';
 
 export function extractSheetId(sheetInput) {
   if (!sheetInput) return '';
@@ -82,25 +14,15 @@ export function extractSheetId(sheetInput) {
 }
 
 /**
- * Deterministically pick an image based on title string hash
+ * Mask Spreadsheet ID for secure server logs
  */
-function getDeterministicImage(bank, titleString) {
-  let hash = 0;
-  for (let i = 0; i < titleString.length; i++) {
-    hash = (hash << 5) - hash + titleString.charCodeAt(i);
-    hash |= 0;
-  }
-  const index = Math.abs(hash) % bank.length;
-  return bank[index];
+function maskSheetId(id) {
+  if (!id || id.length < 8) return '****';
+  return `${id.slice(0, 4)}...${id.slice(-4)}`;
 }
 
-import { getUniqueFallbackImage, isUsableImage } from '../utils/imageResolver.js';
-
-// Global used image set per request
-const usedFallbackSet = new Set();
-
 /**
- * Flexible Data-Mapping Layer with Priority 1 (Sheet Image) and Priority 3 (Unique Topic Fallback)
+ * Normalize Spreadsheet Rows
  */
 export function normalizeSheetRow(rowObj, index) {
   const keys = Object.keys(rowObj);
@@ -125,12 +47,10 @@ export function normalizeSheetRow(rowObj, index) {
   let category = findValue(['category', 'type', 'tag', 'topic', 'section', 'genre']);
   const date = findValue(['date', 'published', 'timestamp', 'created', 'time']);
 
-  // Priority 1 — Detect Image Column from Google Sheet
   const sheetImage = findValue(['image', 'image_url', 'imageurl', 'thumbnail', 'thumbnail_url', 'cover', 'cover_image', 'featured_image', 'photo']);
 
   const url = isValidUrl(rawUrl) ? rawUrl : (rawUrl ? `https://${rawUrl}` : '');
 
-  // Derive Category from URL path if not in column
   if (!category && url) {
     try {
       const pathParts = new URL(url).pathname.split('/').filter(p => p && !p.endsWith('.ece') && !p.startsWith('article'));
@@ -143,7 +63,6 @@ export function normalizeSheetRow(rowObj, index) {
   }
   if (!category) category = 'News & Feature';
 
-  // Priority 1 vs Priority 3: Title-Based Topic Fallback Engine
   let image = '';
   let imageSource = 'fallback';
 
@@ -238,21 +157,25 @@ function parseGvizResponse(gvizText) {
   });
 }
 
-const DEFAULT_THE_HINDU_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg/edit?usp=sharing';
-const DEFAULT_THE_HINDU_SHEET_ID = '1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg';
-
+/**
+ * Main Google Sheet Fetcher Service
+ */
 export async function fetchSheetContent(sheetInput, apiKey = '') {
   const effectiveInput = sheetInput || process.env.DEFAULT_SHEET_URL || DEFAULT_THE_HINDU_SHEET_URL;
   const sheetId = extractSheetId(effectiveInput) || process.env.GOOGLE_SHEET_ID || process.env.DEFAULT_SHEET_ID || DEFAULT_THE_HINDU_SHEET_ID;
-  const cacheKey = `sheet_data_v2_${sheetId}`;
   
+  console.log(`[Sheet Service] Processing Spreadsheet ID: ${maskSheetId(sheetId)}`);
+
+  const cacheKey = `sheet_data_v2_${sheetId}`;
   const cached = getCache(cacheKey);
   if (cached) {
+    console.log(`[Sheet Service] Serving cached dataset for ${maskSheetId(sheetId)}`);
     return cached;
   }
 
   const effectiveApiKey = apiKey || process.env.GOOGLE_SHEETS_API_KEY;
 
+  // Strategy 1: Google Sheets API v4 with API Key
   if (effectiveApiKey) {
     try {
       const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:Z1000?key=${effectiveApiKey}`;
@@ -282,10 +205,11 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
         return result;
       }
     } catch (e) {
-      console.warn(`[Sheet API Error] ${e.message}`);
+      console.warn(`[Sheet API Key Strategy Failed] ${e.message}`);
     }
   }
 
+  // Strategy 2: Google Visualization API (Public / Anyone with link)
   try {
     const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
     const response = await axios.get(gvizUrl, { timeout: 8000 });
@@ -306,9 +230,10 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
       return result;
     }
   } catch (e) {
-    console.warn(`[GViz Fetch Error] ${e.message}`);
+    console.warn(`[GViz Strategy Failed] ${e.message}`);
   }
 
+  // Strategy 3: Public CSV Export
   try {
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
     const response = await axios.get(csvUrl, { timeout: 8000 });
@@ -329,19 +254,35 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
       return result;
     }
   } catch (e) {
-    console.warn(`[CSV Fetch Error] ${e.message}`);
+    console.warn(`[CSV Export Strategy Failed] ${e.message}`);
   }
 
-  const items = SAMPLE_DIGITAL_LIBRARY.map((row, idx) => normalizeSheetRow(row, idx));
+  // Strategy 4: Fallback to Curated 3D Library
+  console.info(`[Sheet Service] Spreadsheet ${maskSheetId(sheetId)} requires authentication. Serving library fallback.`);
+  
+  const sampleItems = [
+    {
+      id: 'sample-1',
+      title: 'From heritage to high-rises, how Chennai grew taller',
+      author: 'R. Aishwaryaa',
+      url: 'https://www.thehindu.com/news/cities/chennai/madras-day-2026-from-heritage-to-high-rises-how-chennai-grew-taller/article71369048.ece',
+      content: 'Exploring the architectural transformation of Chennai from heritage colonial landmarks to modern skyscrapers.',
+      category: 'News • Cities',
+      date: new Date().toISOString().split('T')[0],
+      image: 'https://images.unsplash.com/photo-1582510003544-4d00b7f74220?auto=format&fit=crop&w=1200&q=80'
+    }
+  ];
+
+  const fallbackItems = sampleItems.map((row, idx) => normalizeSheetRow(row, idx));
   const fallbackResult = {
     success: true,
     sourceType: 'sample_fallback',
     sheetId,
     notice: 'Spreadsheet requires private Google sign-in or API Key.',
-    count: items.length,
-    items,
-    categories: [...new Set(items.map(i => i.category))],
-    authors: [...new Set(items.map(i => i.author))],
+    count: fallbackItems.length,
+    items: fallbackItems,
+    categories: [...new Set(fallbackItems.map(i => i.category))],
+    authors: [...new Set(fallbackItems.map(i => i.author))],
     fetchedAt: new Date().toISOString()
   };
   setCache(cacheKey, fallbackResult, 300);
