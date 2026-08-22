@@ -238,10 +238,12 @@ function parseGvizResponse(gvizText) {
   });
 }
 
+const DEFAULT_THE_HINDU_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg/edit?usp=sharing';
 const DEFAULT_THE_HINDU_SHEET_ID = '1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg';
 
 export async function fetchSheetContent(sheetInput, apiKey = '') {
-  const sheetId = extractSheetId(sheetInput) || process.env.GOOGLE_SHEET_ID || process.env.DEFAULT_SHEET_ID || DEFAULT_THE_HINDU_SHEET_ID;
+  const effectiveInput = sheetInput || process.env.DEFAULT_SHEET_URL || DEFAULT_THE_HINDU_SHEET_URL;
+  const sheetId = extractSheetId(effectiveInput) || process.env.GOOGLE_SHEET_ID || process.env.DEFAULT_SHEET_ID || DEFAULT_THE_HINDU_SHEET_ID;
   const cacheKey = `sheet_data_v2_${sheetId}`;
   
   const cached = getCache(cacheKey);
