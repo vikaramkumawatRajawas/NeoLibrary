@@ -6,7 +6,8 @@ import { ContentItem } from '../types/content';
 export function getShareUrl(item?: ContentItem): string {
   if (typeof window === 'undefined') return '';
   
-  const baseUrl = import.meta.env.VITE_APP_URL || window.location.origin;
+  const envAppUrl = (import.meta as any).env?.VITE_APP_URL;
+  const baseUrl = envAppUrl || window.location.origin;
   
   if (item) {
     const searchParams = new URLSearchParams();
