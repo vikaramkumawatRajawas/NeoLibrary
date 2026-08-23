@@ -22,7 +22,11 @@ export function useSheetData(customSheetUrl?: string, customApiKey?: string) {
       setData(res);
     } catch (err: any) {
       console.error('[useSheetData error]', err);
-      setError(err.message || 'Failed to fetch content library data.');
+      if (err instanceof TypeError || err.name === 'TypeError' || err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+        setError('Network error. Please check your connection and try again.');
+      } else {
+        setError(err.message || 'Unable to load articles. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

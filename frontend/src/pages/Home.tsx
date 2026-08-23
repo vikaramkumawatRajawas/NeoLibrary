@@ -126,7 +126,7 @@ export const Home: React.FC<HomeProps> = ({
         ) : error ? (
           <ErrorState message={error} onRetry={onRetry} onOpenSettings={onOpenSettings} />
         ) : items.length === 0 ? (
-          <EmptyState searchQuery={searchQuery} onClearSearch={clearFilters} />
+          <EmptyState searchQuery={searchQuery} onClearSearch={clearFilters} hasActiveFilters={hasActiveFilters} />
         ) : (
           <ContentGrid items={items} onCardClick={onCardClick} />
         )}

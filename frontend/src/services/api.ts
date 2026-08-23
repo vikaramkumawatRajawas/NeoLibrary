@@ -5,13 +5,16 @@ import { SheetApiResponse, ExtractedContentResponse } from '../types/content';
  * Resolves VITE_API_URL environment variable or defaults to same-origin /api.
  */
 export function getApiBaseUrl(): string {
-  const envUrl = (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.VITE_APP_URL;
-  if (envUrl && typeof envUrl === 'string' && envUrl.trim().length > 0) {
-    let cleanUrl = envUrl.trim().replace(/\/+$/, '');
-    if (cleanUrl.endsWith('/api')) {
-      cleanUrl = cleanUrl.replace(/\/api$/, '');
+  const rawEnv = (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.VITE_APP_URL;
+  if (rawEnv && typeof rawEnv === 'string') {
+    const trimmed = rawEnv.trim();
+    if (trimmed.length > 0 && trimmed !== 'undefined' && trimmed !== 'null' && trimmed !== '[object Object]') {
+      let cleanUrl = trimmed.replace(/\/+$/, '');
+      if (cleanUrl.endsWith('/api')) {
+        cleanUrl = cleanUrl.slice(0, -4);
+      }
+      return cleanUrl;
     }
-    return cleanUrl;
   }
   return '';
 }
@@ -21,24 +24,31 @@ export function getApiBaseUrl(): string {
  */
 export async function fetchSheetData(sheetUrl?: string, apiKey?: string): Promise<SheetApiResponse> {
   const params = new URLSearchParams();
-  if (sheetUrl) params.append('url', sheetUrl);
-  if (apiKey) params.append('apiKey', apiKey);
+  if (sheetUrl && sheetUrl.trim().length > 0) params.append('url', sheetUrl.trim());
+  if (apiKey && apiKey.trim().length > 0) params.append('apiKey', apiKey.trim());
 
   const baseUrl = getApiBaseUrl();
-  const endpoint = `${baseUrl}/api/sheet?${params.toString()}`;
+  const queryString = params.toString();
+  const endpoint = `${baseUrl}/api/sheet${queryString ? `?${queryString}` : ''}`;
 
   const response = await fetch(endpoint);
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
-    let errorMessage = `Failed to load content from server (${response.status})`;
+    let errorMessage = 'Unable to load articles. Please try again.';
     try {
       const parsed = JSON.parse(errorText);
       if (parsed.error) errorMessage = parsed.error;
     } catch (e) {}
     throw new Error(errorMessage);
   }
-  return response.json();
+  
+  const data: SheetApiResponse = await response.json();
+  if (data && data.success === false) {
+    throw new Error(data.error || 'Unable to load articles. Please try again.');
+  }
+  return data;
 }
+
 
 /**
  * Fetch extracted webpage article content for details page

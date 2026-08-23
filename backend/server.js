@@ -41,8 +41,10 @@ app.use((req, res, next) => {
 // API Route: Google Sheet Content Fetching & Normalization
 app.get('/api/sheet', async (req, res) => {
   try {
-    const sheetInput = req.query.url || process.env.DEFAULT_SHEET_URL;
-    const apiKey = req.query.apiKey || process.env.GOOGLE_SHEETS_API_KEY;
+    const rawUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+    const sheetInput = rawUrl.length > 0 ? rawUrl : (process.env.DEFAULT_SHEET_URL || process.env.GOOGLE_SHEET_ID || '');
+    const rawKey = typeof req.query.apiKey === 'string' ? req.query.apiKey.trim() : '';
+    const apiKey = rawKey.length > 0 ? rawKey : (process.env.GOOGLE_SHEETS_API_KEY || '');
 
     const sheetData = await fetchSheetContent(sheetInput, apiKey);
     return res.status(200).json(sheetData);
@@ -51,12 +53,13 @@ app.get('/api/sheet', async (req, res) => {
     const statusCode = error.statusCode || 500;
     return res.status(statusCode).json({
       success: false,
-      error: error.message || 'Failed to process Google Sheet data.',
+      error: 'Unable to load data from Google Sheets',
       statusCode,
-      details: error.details || null
+      details: error.message || null
     });
   }
 });
+
 
 // API Route: URL Content Extraction Service
 app.get('/api/extract-content', async (req, res) => {
