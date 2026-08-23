@@ -83,12 +83,24 @@ export function useSheetData(customSheetUrl?: string, customApiKey?: string) {
     }
 
     // 5. Sorting
+    const parseSafeDate = (dateStr?: string): number => {
+      if (!dateStr) return 0;
+      const parsed = Date.parse(dateStr);
+      if (!isNaN(parsed)) return parsed;
+      const match = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if (match) {
+        const d = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+        if (!isNaN(d.getTime())) return d.getTime();
+      }
+      return 0;
+    };
+
     items.sort((a, b) => {
       if (sortOption === 'newest') {
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
+        return parseSafeDate(b.date) - parseSafeDate(a.date);
       }
       if (sortOption === 'oldest') {
-        return new Date(a.date).getTime() - new Date(b.date).getTime();
+        return parseSafeDate(a.date) - parseSafeDate(b.date);
       }
       if (sortOption === 'a-z') {
         return a.title.localeCompare(b.title);

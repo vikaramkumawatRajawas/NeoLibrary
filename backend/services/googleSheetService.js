@@ -161,8 +161,10 @@ function parseGvizResponse(gvizText) {
  * Main Google Sheet Fetcher Service
  */
 export async function fetchSheetContent(sheetInput, apiKey = '') {
-  const envSheetId = process.env.GOOGLE_SHEET_ID || process.env.DEFAULT_SHEET_ID;
-  const envSheetUrl = process.env.DEFAULT_SHEET_URL;
+  console.log('[THE-HINDU] Fetch started');
+
+  const envSheetId = process.env.THE_HINDU_SHEET_ID || process.env.GOOGLE_SHEET_ID || process.env.DEFAULT_SHEET_ID;
+  const envSheetUrl = process.env.THE_HINDU_SHEET_URL || process.env.DEFAULT_SHEET_URL;
 
   let sheetId = '';
   if (sheetInput && typeof sheetInput === 'string' && sheetInput.trim().length > 0) {
@@ -177,25 +179,38 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
   if (!sheetId) {
     sheetId = DEFAULT_THE_HINDU_SHEET_ID;
   }
-  
-  console.log(`[Sheet Service] Google Sheet ID configured: ${sheetId ? 'yes' : 'no'} (${maskSheetId(sheetId)})`);
-  console.log('[Sheet Service] Google Sheets request started');
 
-  const cacheKey = `sheet_data_v2_${sheetId}`;
+  const sheetName = process.env.THE_HINDU_SHEET_NAME || process.env.SHEET_NAME || '';
+  const sheetRange = process.env.THE_HINDU_SHEET_RANGE || process.env.SHEET_RANGE || 'A1:Z1000';
+  const sheetGid = process.env.THE_HINDU_GID || process.env.GID || '';
+  const effectiveApiKey = apiKey || process.env.GOOGLE_SHEETS_API_KEY || '';
+
+  console.log(`[THE-HINDU] Spreadsheet configured: YES (${maskSheetId(sheetId)})`);
+  console.log(`[THE-HINDU] Worksheet configured: ${sheetName ? `YES (${sheetName})` : 'DEFAULT'}`);
+  console.log(`[THE-HINDU] API configuration: ${effectiveApiKey ? 'YES (API Key)' : 'PUBLIC ACCESS'}`);
+
+  const cacheKey = `sheet_data_v3_${sheetId}_${sheetName}_${sheetGid}`;
   const cached = getCache(cacheKey);
-  if (cached) {
-    console.log(`[Sheet Service] Cache hit: Serving cached dataset for ${maskSheetId(sheetId)}`);
+  if (cached && cached.success && cached.items && cached.items.length > 0) {
+    console.log(`[THE-HINDU] Cache hit: Serving ${cached.items.length} cached articles for ${maskSheetId(sheetId)}`);
+    console.log(`[THE-HINDU] API response sent: ${cached.items.length} articles`);
     return cached;
   }
-  console.log(`[Sheet Service] Cache miss: Fetching fresh sheet data for ${maskSheetId(sheetId)}`);
+  console.log(`[THE-HINDU] Cache miss: Fetching fresh sheet data for ${maskSheetId(sheetId)}`);
 
-  const effectiveApiKey = apiKey || process.env.GOOGLE_SHEETS_API_KEY;
+  const httpHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cache-Control': 'no-cache',
+  };
 
   // Strategy 1: Google Sheets API v4 with API Key
   if (effectiveApiKey) {
     try {
-      const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:Z1000?key=${effectiveApiKey}`;
-      const response = await axios.get(apiUrl, { timeout: 8000 });
+      const rangeParam = sheetName ? `${encodeURIComponent(sheetName)}!${sheetRange}` : sheetRange;
+      const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${rangeParam}?key=${effectiveApiKey}`;
+      const response = await axios.get(apiUrl, { timeout: 15000, headers: httpHeaders });
       if (response.data && response.data.values && response.data.values.length > 0) {
         const rawValues = response.data.values;
         const [headers, ...rows] = rawValues;
@@ -207,79 +222,107 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
           return obj;
         });
 
-        const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx));
-        console.log(`[Sheet Service] Google Sheets response received (API v4). Total rows: ${rows.length}, Valid articles parsed: ${items.length}`);
-        
-        const result = {
-          success: true,
-          sourceType: 'google_sheets_api',
-          sheetId,
-          count: items.length,
-          items,
-          categories: [...new Set(items.map(i => i.category))],
-          authors: [...new Set(items.map(i => i.author))],
-          fetchedAt: new Date().toISOString()
-        };
-        setCache(cacheKey, result, 600);
-        return result;
+        const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx)).filter(item => item && item.title);
+        console.log(`[THE-HINDU] Google response received (API v4)`);
+        console.log(`[THE-HINDU] Rows received: ${rows.length}`);
+        console.log(`[THE-HINDU] Articles parsed: ${items.length}`);
+
+        if (items.length > 0) {
+          const result = {
+            success: true,
+            source: 'the-hindu',
+            sourceType: 'google_sheets_api',
+            sheetId,
+            count: items.length,
+            items,
+            data: items,
+            categories: [...new Set(items.map(i => i.category))],
+            authors: [...new Set(items.map(i => i.author))],
+            fetchedAt: new Date().toISOString()
+          };
+          setCache(cacheKey, result, 600);
+          console.log(`[THE-HINDU] API response sent: ${items.length} articles`);
+          return result;
+        }
       }
     } catch (e) {
-      console.warn(`[Sheet Service] Google Sheets API strategy failed: ${e.message}`);
+      console.warn(`[THE-HINDU] API Key strategy failed: ${e.message}`);
     }
   }
 
-  // Strategy 2: Google Visualization API (Public / Anyone with link)
+  // Strategy 2: Google Visualization API (GViz Endpoint)
   try {
-    const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
-    const response = await axios.get(gvizUrl, { timeout: 8000 });
-    const rowObjects = parseGvizResponse(response.data);
-    const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx));
-    console.log(`[Sheet Service] Google Sheets response received (GViz). Total rows: ${rowObjects.length}, Valid articles parsed: ${items.length}`);
+    let gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
+    if (sheetName) gvizUrl += `&sheet=${encodeURIComponent(sheetName)}`;
+    if (sheetGid) gvizUrl += `&gid=${sheetGid}`;
 
-    const result = {
-      success: true,
-      sourceType: 'gviz_public',
-      sheetId,
-      count: items.length,
-      items,
-      categories: [...new Set(items.map(i => i.category))],
-      authors: [...new Set(items.map(i => i.author))],
-      fetchedAt: new Date().toISOString()
-    };
-    setCache(cacheKey, result, 600);
-    return result;
+    const response = await axios.get(gvizUrl, { timeout: 15000, headers: httpHeaders });
+    const rowObjects = parseGvizResponse(response.data);
+    const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx)).filter(item => item && item.title);
+    console.log(`[THE-HINDU] Google response received (GViz)`);
+    console.log(`[THE-HINDU] Rows received: ${rowObjects.length}`);
+    console.log(`[THE-HINDU] Articles parsed: ${items.length}`);
+
+    if (items.length > 0) {
+      const result = {
+        success: true,
+        source: 'the-hindu',
+        sourceType: 'gviz_public',
+        sheetId,
+        count: items.length,
+        items,
+        data: items,
+        categories: [...new Set(items.map(i => i.category))],
+        authors: [...new Set(items.map(i => i.author))],
+        fetchedAt: new Date().toISOString()
+      };
+      setCache(cacheKey, result, 600);
+      console.log(`[THE-HINDU] API response sent: ${items.length} articles`);
+      return result;
+    }
   } catch (e) {
-    console.warn(`[Sheet Service] GViz strategy failed: ${e.message}`);
+    console.warn(`[THE-HINDU] GViz strategy failed: ${e.message}`);
   }
 
   // Strategy 3: Public CSV Export
   try {
-    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
-    const response = await axios.get(csvUrl, { timeout: 8000 });
-    const rowObjects = parseCsvToObjects(response.data);
-    const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx));
-    console.log(`[Sheet Service] Google Sheets response received (CSV). Total rows: ${rowObjects.length}, Valid articles parsed: ${items.length}`);
+    let csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+    if (sheetGid) csvUrl += `&gid=${sheetGid}`;
+    if (sheetName) csvUrl += `&sheet=${encodeURIComponent(sheetName)}`;
 
-    const result = {
-      success: true,
-      sourceType: 'csv_public',
-      sheetId,
-      count: items.length,
-      items,
-      categories: [...new Set(items.map(i => i.category))],
-      authors: [...new Set(items.map(i => i.author))],
-      fetchedAt: new Date().toISOString()
-    };
-    setCache(cacheKey, result, 600);
-    return result;
+    const response = await axios.get(csvUrl, { timeout: 15000, headers: httpHeaders });
+    const rowObjects = parseCsvToObjects(response.data);
+    const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx)).filter(item => item && item.title);
+    console.log(`[THE-HINDU] Google response received (CSV)`);
+    console.log(`[THE-HINDU] Rows received: ${rowObjects.length}`);
+    console.log(`[THE-HINDU] Articles parsed: ${items.length}`);
+
+    if (items.length > 0) {
+      const result = {
+        success: true,
+        source: 'the-hindu',
+        sourceType: 'csv_public',
+        sheetId,
+        count: items.length,
+        items,
+        data: items,
+        categories: [...new Set(items.map(i => i.category))],
+        authors: [...new Set(items.map(i => i.author))],
+        fetchedAt: new Date().toISOString()
+      };
+      setCache(cacheKey, result, 600);
+      console.log(`[THE-HINDU] API response sent: ${items.length} articles`);
+      return result;
+    }
   } catch (e) {
-    console.warn(`[Sheet Service] CSV Export strategy failed: ${e.message}`);
+    console.warn(`[THE-HINDU] CSV strategy failed: ${e.message}`);
   }
 
   // If all strategies fail, do NOT return fake/sample data. Throw proper error.
-  console.error(`[Sheet Service] Google Sheets API error: Unable to fetch Google Sheet data for Spreadsheet ID ${maskSheetId(sheetId)}`);
-  const err = new Error('Unable to load data from Google Sheets');
+  console.error(`[THE-HINDU] ERROR: Unable to fetch The Hindu Google Sheet for Spreadsheet ID ${maskSheetId(sheetId)}`);
+  const err = new Error('Unable to fetch The Hindu Google Sheet');
   err.statusCode = 500;
   throw err;
 }
+
 

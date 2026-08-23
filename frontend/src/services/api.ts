@@ -44,7 +44,12 @@ export async function fetchSheetData(sheetUrl?: string, apiKey?: string): Promis
   
   const data: SheetApiResponse = await response.json();
   if (data && data.success === false) {
-    throw new Error(data.error || 'Unable to load articles. Please try again.');
+    throw new Error(data.message || data.error || 'Unable to load articles. Please try again.');
+  }
+
+  // Ensure items array is normalized whether backend sends .data or .items
+  if (data && !data.items && Array.isArray((data as any).data)) {
+    data.items = (data as any).data;
   }
   return data;
 }

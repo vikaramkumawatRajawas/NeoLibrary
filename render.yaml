@@ -6,10 +6,15 @@ services:
     startCommand: node backend/server.js
     healthCheckPath: /api/health
     envVars:
+      - key: THE_HINDU_SHEET_ID
+        value: 1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg
       - key: GOOGLE_SHEET_ID
         value: 1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg
+      - key: THE_HINDU_SHEET_URL
+        value: https://docs.google.com/spreadsheets/d/1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg/edit
       - key: DEFAULT_SHEET_URL
         value: https://docs.google.com/spreadsheets/d/1KDVGSCjW9CU7-4HLi0hpXotlG8F8yVRIla0Pnw2cdTg/edit
       - key: NODE_ENV
         value: production
+
 

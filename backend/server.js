@@ -39,26 +39,33 @@ app.use((req, res, next) => {
 });
 
 // API Route: Google Sheet Content Fetching & Normalization
-app.get('/api/sheet', async (req, res) => {
+const handleSheetFetch = async (req, res) => {
   try {
     const rawUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
-    const sheetInput = rawUrl.length > 0 ? rawUrl : (process.env.DEFAULT_SHEET_URL || process.env.GOOGLE_SHEET_ID || '');
+    const sheetInput = rawUrl.length > 0 ? rawUrl : (process.env.THE_HINDU_SHEET_URL || process.env.DEFAULT_SHEET_URL || process.env.THE_HINDU_SHEET_ID || process.env.GOOGLE_SHEET_ID || '');
     const rawKey = typeof req.query.apiKey === 'string' ? req.query.apiKey.trim() : '';
     const apiKey = rawKey.length > 0 ? rawKey : (process.env.GOOGLE_SHEETS_API_KEY || '');
 
     const sheetData = await fetchSheetContent(sheetInput, apiKey);
     return res.status(200).json(sheetData);
   } catch (error) {
-    console.error('[API /api/sheet Error]', error.message);
+    console.error('[THE-HINDU] API Error:', error.message);
     const statusCode = error.statusCode || 500;
     return res.status(statusCode).json({
       success: false,
-      error: 'Unable to load data from Google Sheets',
+      source: 'the-hindu',
+      message: 'Unable to fetch The Hindu Google Sheet',
+      error: error.message || 'Unable to fetch The Hindu Google Sheet',
       statusCode,
       details: error.message || null
     });
   }
-});
+};
+
+app.get('/api/sheet', handleSheetFetch);
+app.get('/api/library/articles', handleSheetFetch);
+app.get('/api/the-hindu', handleSheetFetch);
+
 
 
 // API Route: URL Content Extraction Service
