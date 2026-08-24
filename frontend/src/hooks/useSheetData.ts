@@ -14,18 +14,18 @@ export function useSheetData(customSheetUrl?: string, customApiKey?: string) {
   const [quickFilter, setQuickFilter] = useState<'all' | 'latest' | 'popular'>('all');
   const [sortOption, setSortOption] = useState<SortOption>('newest');
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchSheetData(customSheetUrl, customApiKey);
+      const res = await fetchSheetData(customSheetUrl, customApiKey, forceRefresh);
       setData(res);
     } catch (err: any) {
       console.error('[useSheetData error]', err);
       if (err instanceof TypeError || err.name === 'TypeError' || err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
-        setError('Network error. Please check your connection and try again.');
+        setError('Network error. Unable to reach the server. Please check your connection and try again.');
       } else {
-        setError(err.message || 'Unable to load articles. Please try again.');
+        setError(err.message || 'Unable to load Google Sheet data. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -144,6 +144,6 @@ export function useSheetData(customSheetUrl?: string, customApiKey?: string) {
     sortOption,
     setSortOption,
     clearFilters,
-    refresh: loadData,
+    refresh: () => loadData(true),
   };
 }

@@ -22,10 +22,11 @@ export function getApiBaseUrl(): string {
 /**
  * Fetch Google Sheet content or fallback library
  */
-export async function fetchSheetData(sheetUrl?: string, apiKey?: string): Promise<SheetApiResponse> {
+export async function fetchSheetData(sheetUrl?: string, apiKey?: string, refresh?: boolean): Promise<SheetApiResponse> {
   const params = new URLSearchParams();
   if (sheetUrl && sheetUrl.trim().length > 0) params.append('url', sheetUrl.trim());
   if (apiKey && apiKey.trim().length > 0) params.append('apiKey', apiKey.trim());
+  if (refresh) params.append('refresh', 'true');
 
   const baseUrl = getApiBaseUrl();
   const queryString = params.toString();
@@ -34,17 +35,18 @@ export async function fetchSheetData(sheetUrl?: string, apiKey?: string): Promis
   const response = await fetch(endpoint);
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
-    let errorMessage = 'Unable to load articles. Please try again.';
+    let errorMessage = 'Unable to load Google Sheet data.';
     try {
       const parsed = JSON.parse(errorText);
       if (parsed.error) errorMessage = parsed.error;
+      else if (parsed.message) errorMessage = parsed.message;
     } catch (e) {}
     throw new Error(errorMessage);
   }
   
   const data: SheetApiResponse = await response.json();
   if (data && data.success === false) {
-    throw new Error(data.message || data.error || 'Unable to load articles. Please try again.');
+    throw new Error(data.message || data.error || 'Unable to load Google Sheet data.');
   }
 
   // Ensure items array is normalized whether backend sends .data or .items

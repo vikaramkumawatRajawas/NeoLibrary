@@ -25,6 +25,8 @@ function maskSheetId(id) {
  * Normalize Spreadsheet Rows
  */
 export function normalizeSheetRow(rowObj, index) {
+  if (!rowObj || typeof rowObj !== 'object') return null;
+
   const keys = Object.keys(rowObj);
 
   const findValue = (patterns) => {
@@ -40,8 +42,8 @@ export function normalizeSheetRow(rowObj, index) {
     return '';
   };
 
-  const title = findValue(['title', 'name', 'headline', 'topic', 'article', 'heading']) || `Article #${index + 1}`;
-  const author = findValue(['author', 'by', 'creator', 'writer', 'byline', 'source']) || 'The Hindu Editorial';
+  const rawTitle = findValue(['title', 'name', 'headline', 'topic', 'article', 'heading']);
+  const author = findValue(['author', 'by', 'creator', 'writer', 'byline', 'source']);
   const rawUrl = findValue(['url', 'link', 'website', 'sourceurl', 'articleurl', 'href']);
   const content = findValue(['content', 'description', 'summary', 'excerpt', 'text', 'abstract', 'details', 'body']);
   let category = findValue(['category', 'type', 'tag', 'topic', 'section', 'genre']);
@@ -49,8 +51,15 @@ export function normalizeSheetRow(rowObj, index) {
 
   const sheetImage = findValue(['image', 'image_url', 'imageurl', 'thumbnail', 'thumbnail_url', 'cover', 'cover_image', 'featured_image', 'photo']);
 
+  // Check if this is an empty spreadsheet row
+  if (!rawTitle && !rawUrl && !author && !content) {
+    return null;
+  }
+
+  const title = rawTitle || `Article #${index + 1}`;
   const url = isValidUrl(rawUrl) ? rawUrl : (rawUrl ? `https://${rawUrl}` : '');
 
+  // Auto-infer category from URL structure if missing
   if (!category && url) {
     try {
       const pathParts = new URL(url).pathname.split('/').filter(p => p && !p.endsWith('.ece') && !p.startsWith('article'));
@@ -87,56 +96,138 @@ export function normalizeSheetRow(rowObj, index) {
   };
 }
 
+/**
+ * Robust RFC 4180 compliant CSV Parser
+ */
 function parseCsvToObjects(csvText) {
-  const lines = csvText.split(/\r?\n/).filter(line => line.trim().length > 0);
-  if (lines.length === 0) return [];
+  if (!csvText || typeof csvText !== 'string') return [];
+  const trimmedText = csvText.trim();
+  if (trimmedText.startsWith('<!DOCTYPE') || trimmedText.includes('<html') || trimmedText.includes('ServiceLogin')) {
+    throw new Error('Spreadsheet is not publicly viewable. Please share with "Anyone with the link → Viewer".');
+  }
 
-  const parseLine = (line) => {
-    const result = [];
-    let cur = '';
+  const parseCsvLines = (text) => {
+    const rows = [];
+    let curRow = [];
+    let curVal = '';
     let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        result.push(cur.trim());
-        cur = '';
+    let i = 0;
+
+    while (i < text.length) {
+      const char = text[i];
+      const nextChar = text[i + 1];
+
+      if (inQuotes) {
+        if (char === '"' && nextChar === '"') {
+          curVal += '"';
+          i += 2;
+          continue;
+        } else if (char === '"') {
+          inQuotes = false;
+          i++;
+          continue;
+        } else {
+          curVal += char;
+          i++;
+          continue;
+        }
       } else {
-        cur += char;
+        if (char === '"') {
+          inQuotes = true;
+          i++;
+          continue;
+        } else if (char === ',') {
+          curRow.push(curVal.trim());
+          curVal = '';
+          i++;
+          continue;
+        } else if (char === '\r') {
+          if (nextChar === '\n') i++;
+          curRow.push(curVal.trim());
+          rows.push(curRow);
+          curRow = [];
+          curVal = '';
+          i++;
+          continue;
+        } else if (char === '\n') {
+          curRow.push(curVal.trim());
+          rows.push(curRow);
+          curRow = [];
+          curVal = '';
+          i++;
+          continue;
+        } else {
+          curVal += char;
+          i++;
+          continue;
+        }
       }
     }
-    result.push(cur.trim());
-    return result;
+
+    if (curVal.length > 0 || curRow.length > 0) {
+      curRow.push(curVal.trim());
+      rows.push(curRow);
+    }
+    return rows;
   };
 
-  const headers = parseLine(lines[0]);
-  const rows = [];
+  const parsedRows = parseCsvLines(trimmedText);
+  if (parsedRows.length === 0) return [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseLine(lines[i]);
+  const rawHeaders = parsedRows[0];
+  const headers = rawHeaders.map((h, idx) => (h ? h.replace(/^["']|["']$/g, '').trim() : `col_${idx}`));
+
+  const objects = [];
+  for (let i = 1; i < parsedRows.length; i++) {
+    const rowValues = parsedRows[i];
+    if (!rowValues || rowValues.every(v => !v || v.trim().length === 0)) continue;
+
     const obj = {};
     headers.forEach((header, idx) => {
-      obj[header] = values[idx] || '';
+      obj[header] = rowValues[idx] || '';
     });
-    if (Object.values(obj).some(v => v.length > 0)) {
-      rows.push(obj);
-    }
+    objects.push(obj);
   }
-  return rows;
+
+  return objects;
 }
 
+/**
+ * Robust GViz JSON Parser
+ */
 function parseGvizResponse(gvizText) {
-  const jsonMatch = gvizText.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?/);
+  if (!gvizText || typeof gvizText !== 'string') throw new Error('Invalid GViz response format');
+  const trimmed = gvizText.trim();
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.includes('<html') || trimmed.includes('ServiceLogin')) {
+    throw new Error('Spreadsheet is not publicly viewable. Please share with "Anyone with the link → Viewer".');
+  }
+
+  const jsonMatch = trimmed.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?/);
   if (!jsonMatch) throw new Error('Invalid GViz response format');
-  const parsed = JSON.parse(jsonMatch[1]);
+
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonMatch[1]);
+  } catch (e) {
+    throw new Error('Failed to parse GViz JSON structure');
+  }
+
   if (!parsed.table || !parsed.table.rows || parsed.table.rows.length === 0) return [];
 
-  let headers = (parsed.table.cols || []).map(col => (col.label || col.id || '').trim());
+  let headers = (parsed.table.cols || []).map((col, idx) => {
+    const label = col.label || col.id || '';
+    return label.trim() || `col_${idx}`;
+  });
+
   let rows = parsed.table.rows;
 
   const firstRowCells = rows[0]?.c || [];
-  const firstRowValues = firstRowCells.map(c => c ? String(c.v || '').trim() : '');
+  const firstRowValues = firstRowCells.map(c => {
+    if (!c) return '';
+    if (c.v !== null && c.v !== undefined) return String(c.v).trim();
+    if (c.f !== null && c.f !== undefined) return String(c.f).trim();
+    return '';
+  });
   
   const isHeaderRow = firstRowValues.some(val => 
     ['title', 'name', 'headline', 'url', 'link', 'author', 'by', 'category', 'date', 'image', 'photo', 'cover', 'thumbnail'].some(term => val.toLowerCase().includes(term))
@@ -151,7 +242,12 @@ function parseGvizResponse(gvizText) {
     const obj = {};
     (row.c || []).forEach((cell, idx) => {
       const header = headers[idx] || `col_${idx}`;
-      obj[header] = cell ? (cell.v !== null ? String(cell.v).trim() : '') : '';
+      let cellVal = '';
+      if (cell) {
+        if (cell.v !== null && cell.v !== undefined) cellVal = String(cell.v).trim();
+        else if (cell.f !== null && cell.f !== undefined) cellVal = String(cell.f).trim();
+      }
+      obj[header] = cellVal;
     });
     return obj;
   });
@@ -160,8 +256,8 @@ function parseGvizResponse(gvizText) {
 /**
  * Main Google Sheet Fetcher Service
  */
-export async function fetchSheetContent(sheetInput, apiKey = '') {
-  console.log('[THE-HINDU] Fetch started');
+export async function fetchSheetContent(sheetInput, apiKey = '', bypassCache = false) {
+  console.log('[THE-HINDU] API request received: Sheet fetch process initiated');
 
   const envSheetId = process.env.THE_HINDU_SHEET_ID || process.env.GOOGLE_SHEET_ID || process.env.DEFAULT_SHEET_ID;
   const envSheetUrl = process.env.THE_HINDU_SHEET_URL || process.env.DEFAULT_SHEET_URL;
@@ -185,18 +281,23 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
   const sheetGid = process.env.THE_HINDU_GID || process.env.GID || '';
   const effectiveApiKey = apiKey || process.env.GOOGLE_SHEETS_API_KEY || '';
 
-  console.log(`[THE-HINDU] Spreadsheet configured: YES (${maskSheetId(sheetId)})`);
-  console.log(`[THE-HINDU] Worksheet configured: ${sheetName ? `YES (${sheetName})` : 'DEFAULT'}`);
-  console.log(`[THE-HINDU] API configuration: ${effectiveApiKey ? 'YES (API Key)' : 'PUBLIC ACCESS'}`);
+  console.log(`[THE-HINDU] Spreadsheet ID: ${maskSheetId(sheetId)}`);
+  console.log(`[THE-HINDU] Sheet Name: ${sheetName ? sheetName : 'DEFAULT (First Tab)'}`);
+  console.log(`[THE-HINDU] Sheet GID: ${sheetGid ? sheetGid : 'DEFAULT (0)'}`);
+  console.log(`[THE-HINDU] Auth Strategy: ${effectiveApiKey ? 'Google Sheets API Key' : 'Public Access (GViz/CSV)'}`);
 
-  const cacheKey = `sheet_data_v3_${sheetId}_${sheetName}_${sheetGid}`;
-  const cached = getCache(cacheKey);
-  if (cached && cached.success && cached.items && cached.items.length > 0) {
-    console.log(`[THE-HINDU] Cache hit: Serving ${cached.items.length} cached articles for ${maskSheetId(sheetId)}`);
-    console.log(`[THE-HINDU] API response sent: ${cached.items.length} articles`);
-    return cached;
+  const cacheKey = `sheet_data_v4_${sheetId}_${sheetName}_${sheetGid}`;
+
+  if (!bypassCache) {
+    const cached = getCache(cacheKey);
+    if (cached && cached.success && cached.items && cached.items.length > 0) {
+      console.log(`[THE-HINDU] Cache HIT: Returning ${cached.items.length} cached articles for ${maskSheetId(sheetId)}`);
+      return cached;
+    }
+    console.log(`[THE-HINDU] Cache MISS: Fetching fresh data for ${maskSheetId(sheetId)}`);
+  } else {
+    console.log(`[THE-HINDU] Cache BYPASS requested: Fetching fresh data from Google Sheets for ${maskSheetId(sheetId)}`);
   }
-  console.log(`[THE-HINDU] Cache miss: Fetching fresh sheet data for ${maskSheetId(sheetId)}`);
 
   const httpHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -205,12 +306,17 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
     'Cache-Control': 'no-cache',
   };
 
+  let lastError = null;
+
   // Strategy 1: Google Sheets API v4 with API Key
   if (effectiveApiKey) {
     try {
+      console.log('[THE-HINDU] Attempting Strategy 1: Google Sheets API v4');
       const rangeParam = sheetName ? `${encodeURIComponent(sheetName)}!${sheetRange}` : sheetRange;
       const apiUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${rangeParam}?key=${effectiveApiKey}`;
       const response = await axios.get(apiUrl, { timeout: 15000, headers: httpHeaders });
+      console.log(`[THE-HINDU] Strategy 1 HTTP Status: ${response.status}`);
+      
       if (response.data && response.data.values && response.data.values.length > 0) {
         const rawValues = response.data.values;
         const [headers, ...rows] = rawValues;
@@ -222,10 +328,8 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
           return obj;
         });
 
-        const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx)).filter(item => item && item.title);
-        console.log(`[THE-HINDU] Google response received (API v4)`);
-        console.log(`[THE-HINDU] Rows received: ${rows.length}`);
-        console.log(`[THE-HINDU] Articles parsed: ${items.length}`);
+        const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx)).filter(Boolean);
+        console.log(`[THE-HINDU] Strategy 1 succeeded: Received ${rows.length} rows, parsed ${items.length} articles`);
 
         if (items.length > 0) {
           const result = {
@@ -241,27 +345,28 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
             fetchedAt: new Date().toISOString()
           };
           setCache(cacheKey, result, 600);
-          console.log(`[THE-HINDU] API response sent: ${items.length} articles`);
           return result;
         }
       }
     } catch (e) {
-      console.warn(`[THE-HINDU] API Key strategy failed: ${e.message}`);
+      console.warn(`[THE-HINDU] Strategy 1 (API v4) failed: ${e.message}`);
+      lastError = e;
     }
   }
 
   // Strategy 2: Google Visualization API (GViz Endpoint)
   try {
+    console.log('[THE-HINDU] Attempting Strategy 2: Google Visualization API (GViz)');
     let gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
     if (sheetName) gvizUrl += `&sheet=${encodeURIComponent(sheetName)}`;
     if (sheetGid) gvizUrl += `&gid=${sheetGid}`;
 
     const response = await axios.get(gvizUrl, { timeout: 15000, headers: httpHeaders });
+    console.log(`[THE-HINDU] Strategy 2 HTTP Status: ${response.status}`);
+
     const rowObjects = parseGvizResponse(response.data);
-    const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx)).filter(item => item && item.title);
-    console.log(`[THE-HINDU] Google response received (GViz)`);
-    console.log(`[THE-HINDU] Rows received: ${rowObjects.length}`);
-    console.log(`[THE-HINDU] Articles parsed: ${items.length}`);
+    const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx)).filter(Boolean);
+    console.log(`[THE-HINDU] Strategy 2 succeeded: Received ${rowObjects.length} rows, parsed ${items.length} articles`);
 
     if (items.length > 0) {
       const result = {
@@ -277,25 +382,26 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
         fetchedAt: new Date().toISOString()
       };
       setCache(cacheKey, result, 600);
-      console.log(`[THE-HINDU] API response sent: ${items.length} articles`);
       return result;
     }
   } catch (e) {
-    console.warn(`[THE-HINDU] GViz strategy failed: ${e.message}`);
+    console.warn(`[THE-HINDU] Strategy 2 (GViz) failed: ${e.message}`);
+    lastError = e;
   }
 
   // Strategy 3: Public CSV Export
   try {
+    console.log('[THE-HINDU] Attempting Strategy 3: Public CSV Export');
     let csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
     if (sheetGid) csvUrl += `&gid=${sheetGid}`;
     if (sheetName) csvUrl += `&sheet=${encodeURIComponent(sheetName)}`;
 
     const response = await axios.get(csvUrl, { timeout: 15000, headers: httpHeaders });
+    console.log(`[THE-HINDU] Strategy 3 HTTP Status: ${response.status}`);
+
     const rowObjects = parseCsvToObjects(response.data);
-    const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx)).filter(item => item && item.title);
-    console.log(`[THE-HINDU] Google response received (CSV)`);
-    console.log(`[THE-HINDU] Rows received: ${rowObjects.length}`);
-    console.log(`[THE-HINDU] Articles parsed: ${items.length}`);
+    const items = rowObjects.map((row, idx) => normalizeSheetRow(row, idx)).filter(Boolean);
+    console.log(`[THE-HINDU] Strategy 3 succeeded: Received ${rowObjects.length} rows, parsed ${items.length} articles`);
 
     if (items.length > 0) {
       const result = {
@@ -311,18 +417,25 @@ export async function fetchSheetContent(sheetInput, apiKey = '') {
         fetchedAt: new Date().toISOString()
       };
       setCache(cacheKey, result, 600);
-      console.log(`[THE-HINDU] API response sent: ${items.length} articles`);
       return result;
     }
   } catch (e) {
-    console.warn(`[THE-HINDU] CSV strategy failed: ${e.message}`);
+    console.warn(`[THE-HINDU] Strategy 3 (CSV) failed: ${e.message}`);
+    lastError = e;
   }
 
-  // If all strategies fail, do NOT return fake/sample data. Throw proper error.
-  console.error(`[THE-HINDU] ERROR: Unable to fetch The Hindu Google Sheet for Spreadsheet ID ${maskSheetId(sheetId)}`);
-  const err = new Error('Unable to fetch The Hindu Google Sheet');
+  // If all strategies fail, do NOT return fake/sample data. Throw proper HTTP 500 error.
+  const errorDetails = lastError ? lastError.message : 'No valid article data could be fetched from Google Sheets.';
+  console.error(`[THE-HINDU] ERROR: All fetch strategies failed for Spreadsheet ID ${maskSheetId(sheetId)}. Details: ${errorDetails}`);
+  
+  const err = new Error(errorDetails.includes('publicly viewable') 
+    ? errorDetails 
+    : 'Unable to fetch The Hindu Google Sheet. Please verify spreadsheet access permissions.'
+  );
   err.statusCode = 500;
+  err.originalError = errorDetails;
   throw err;
 }
+
 
 

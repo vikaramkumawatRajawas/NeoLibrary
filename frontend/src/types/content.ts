@@ -12,8 +12,8 @@ export interface ContentItem {
 
 export interface SheetApiResponse {
   success: boolean;
-  sourceType: 'google_sheets_api' | 'gviz_public' | 'csv_public' | 'sample_fallback';
-  sheetId: string;
+  sourceType?: 'google_sheets_api' | 'gviz_public' | 'csv_public' | 'sample_fallback';
+  sheetId?: string;
   notice?: string;
   count: number;
   items: ContentItem[];
@@ -21,6 +21,8 @@ export interface SheetApiResponse {
   authors: string[];
   fetchedAt: string;
   error?: string;
+  message?: string;
+  statusCode?: number;
 }
 
 export interface ExtractedImageItem {

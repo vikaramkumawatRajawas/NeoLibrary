@@ -42,11 +42,15 @@ app.use((req, res, next) => {
 const handleSheetFetch = async (req, res) => {
   try {
     const rawUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
-    const sheetInput = rawUrl.length > 0 ? rawUrl : (process.env.THE_HINDU_SHEET_URL || process.env.DEFAULT_SHEET_URL || process.env.THE_HINDU_SHEET_ID || process.env.GOOGLE_SHEET_ID || '');
+    const sheetInput = rawUrl.length > 0 
+      ? rawUrl 
+      : (process.env.THE_HINDU_SHEET_ID || process.env.GOOGLE_SHEET_ID || process.env.THE_HINDU_SHEET_URL || process.env.DEFAULT_SHEET_URL || '');
+    
     const rawKey = typeof req.query.apiKey === 'string' ? req.query.apiKey.trim() : '';
     const apiKey = rawKey.length > 0 ? rawKey : (process.env.GOOGLE_SHEETS_API_KEY || '');
+    const bypassCache = req.query.refresh === 'true' || req.query.nocache === 'true';
 
-    const sheetData = await fetchSheetContent(sheetInput, apiKey);
+    const sheetData = await fetchSheetContent(sheetInput, apiKey, bypassCache);
     return res.status(200).json(sheetData);
   } catch (error) {
     console.error('[THE-HINDU] API Error:', error.message);
@@ -65,8 +69,6 @@ const handleSheetFetch = async (req, res) => {
 app.get('/api/sheet', handleSheetFetch);
 app.get('/api/library/articles', handleSheetFetch);
 app.get('/api/the-hindu', handleSheetFetch);
-
-
 
 // API Route: URL Content Extraction Service
 app.get('/api/extract-content', async (req, res) => {
@@ -104,8 +106,7 @@ app.post('/api/clear-cache', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
-    timestamp: new Date().toISOString(),
-    env: process.env.NODE_ENV || 'development'
+    env: process.env.NODE_ENV || 'production'
   });
 });
 
